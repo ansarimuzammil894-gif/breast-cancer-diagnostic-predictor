@@ -1,279 +1,194 @@
+[README.md](https://github.com/user-attachments/files/28919383/README.md)
 # Breast Cancer Diagnostic Predictor
-### End-to-End Machine Learning Project | Clinical Impact Analysis
+
+I built this project because I wanted to work on something that actually matters. Predicting whether a tumour is malignant or benign from biopsy measurements isn't a new problem — but most people who tackle it stop at printing an accuracy score and calling it done. I wanted to go further and ask: what does a wrong prediction actually cost? Not in model metrics, but in human terms.
+
+The dataset comes from real Fine Needle Aspirate biopsies performed at the University of Wisconsin Hospital. 569 patients. 30 measurements per patient. One question: malignant or benign?
 
 ---
 
-## Project Overview
+## What I Built
 
-This project builds a machine learning model to predict whether a breast tumour is **malignant or benign** using real biopsy data from the University of Wisconsin Hospital. The goal is not simply to achieve high accuracy — it is to evaluate the model through a **clinical lens**, where the cost of a missed cancer (false negative) is fundamentally different from the cost of a false alarm (false positive).
+An end-to-end diagnostic support pipeline covering data cleaning, exploratory analysis, model training, clinical impact quantification, and visualization — across Python, DataRobot, Excel, and Tableau.
 
-> *"At the default threshold, the XGBoost model identifies 92.9% of malignant cases with 97.5% precision — catching 23 additional cancers compared to an unassisted baseline and preventing an estimated $2.99M in avoidable late-stage treatment costs."*
-
----
-
-## Dataset
-
-**Source:** [UCI Machine Learning Repository — Breast Cancer Wisconsin (Diagnostic)](https://www.kaggle.com/datasets/uciml/breast-cancer-wisconsin-data)
-
-| Property | Detail |
-|---|---|
-| Records | 569 patients |
-| Features | 30 numeric cell nucleus measurements |
-| Target | `diagnosis` — M (Malignant) or B (Benign) |
-| Class split | 62.7% Benign / 37.3% Malignant |
-| Missing values | None |
-
-Features are computed from digitized images of Fine Needle Aspirate (FNA) biopsies. Each feature is measured as **mean**, **standard error**, and **worst** value across cell nuclei, covering:
-- Radius, Texture, Perimeter, Area
-- Smoothness, Compactness, Concavity
-- Concave Points, Symmetry, Fractal Dimension
+The model ended up with a **0.9855 AUC on completely unseen patients**, catching 39 of 42 malignant cases. More importantly, it caught **23 cancers that a random baseline would have missed** — and I quantified what those missed cases would have cost in treatment dollars and survival probability.
 
 ---
 
-## Tools & Technologies
+## The Tools
 
 | Phase | Tool |
-|---|---|
-| Data Cleaning | Python (Google Colab) |
-| Exploratory Analysis | Python — pandas, matplotlib, seaborn, scikit-learn |
-| Model Training & Evaluation | DataRobot (AutoML) |
-| Clinical Impact Analysis | Microsoft Excel |
-| Visualization & Dashboard | Tableau |
+
+| Cleaning & EDA | Python (Google Colab) |
+| Model Training | DataRobot AutoML |
+| Clinical Impact | Microsoft Excel |
+| Visualization | Tableau |
 
 ---
 
-## Project Structure
+## Phase 1 — Cleaning
 
-```
-breast-cancer-diagnostic-predictor/
-│
-├── notebooks/
-│   ├── breast_cancer_phase1_cleaning.ipynb       # Data cleaning
-│   └── breast_cancer_phase2_EDA.ipynb            # Exploratory analysis
-│
-├── data/
-│   ├── data.csv                                  # Original dataset
-│   └── breast_cancer_clean.csv                   # Cleaned dataset
-│
-├── excel/
-│   └── breast_cancer_phase4_clinical_impact.xlsx # Clinical impact workbook
-│
-├── visualizations/
-│   ├── chart1_diagnosis_distribution.png
-│   ├── chart2_top3_boxplots.png
-│   ├── chart3_correlation_heatmap.png
-│   ├── chart4_mean_features_comparison.png
-│   ├── chart5_pca_scatter.png
-│   ├── chart6_feature_importance_correlation.png
-│   ├── chart7_feature_impact_datarobot.png
-│   ├── chart8_roc_confusion_matrix.png
-│   ├── chart9_roc_holdout_confusion_matrix.png
-│   └── chart10_metric_scores.png
-│
-└── README.md
-```
+Nothing dramatic here. The dataset is clean by design — no missing values, no duplicates. The main tasks were dropping two useless columns (`id` and an empty `Unnamed: 32` ghost column), encoding the target variable (M → 1, B → 0), and confirming that the high values in `area_worst` and `perimeter_worst` weren't data errors — they're clinically real. Malignant cells genuinely are that much larger.
+
+**Output:** 569 rows × 31 columns, zero nulls, ready for analysis.
 
 ---
 
-## Phase 1 — Data Cleaning
+## Phase 2 — Exploratory Analysis
 
-**Notebook:** `breast_cancer_phase1_cleaning.ipynb`
+Before touching a model, I wanted to understand what separates a malignant tumour from a benign one in this data. A few things stood out immediately.
 
-Key steps:
-- Dropped `Unnamed: 32` — empty ghost column from CSV trailing comma artifact
-- Dropped `id` — patient identifier with no predictive value
-- Encoded `diagnosis`: M → 1 (Malignant), B → 0 (Benign)
-- Verified zero missing values across all 30 features
-- Verified zero duplicate patient records
-- Confirmed `area_worst` and `perimeter_worst` outliers are clinically valid — malignant tumours genuinely produce extreme cell measurements
+### The class split matters more than it looks
 
-**Output:** `breast_cancer_clean.csv` — 569 rows × 31 columns, zero nulls, zero duplicates
+![Diagnosis Distribution](chart1_diagnosis_distribution.png)
 
----
+62.7% of cases are benign, 37.3% malignant. That sounds balanced enough — but it means a model that predicts "benign" for every single patient would score 62.7% accuracy while missing every cancer in the dataset. Accuracy is the wrong metric here. Recall is what matters.
 
-## Phase 2 — Exploratory Data Analysis
+### The top predictors all measure the same two things
 
-**Notebook:** `breast_cancer_phase2_EDA.ipynb`
+![Top 3 Predictors](chart2_top3_boxplots.png)
 
-### Key Findings
+The three features most correlated with malignancy are `concave points_worst`, `perimeter_worst`, and `concave points_mean`. All three measure either cell size or shape irregularity. Malignant cells are bigger and spikier. That's what the model is learning — and it's consistent with how pathologists diagnose cancer manually.
 
-**1. Class Imbalance**
-- 357 Benign (62.7%) vs 212 Malignant (37.3%)
-- A model predicting "Benign" for every patient achieves 62.7% accuracy while missing 100% of cancers
-- This is why **Recall (Sensitivity)** — not accuracy — is the primary evaluation metric
+### Many features are measuring the same thing
 
-**2. Top Predictors (Manual Correlation Analysis)**
+![Correlation Heatmap](chart3_correlation_heatmap.png)
 
-| Rank | Feature | Correlation with Malignancy |
-|---|---|---|
-| 1 | concave points_worst | 0.794 |
-| 2 | perimeter_worst | 0.783 |
-| 3 | concave points_mean | 0.777 |
-| 4 | radius_worst | 0.776 |
-| 5 | perimeter_mean | 0.742 |
+`radius_mean`, `perimeter_mean`, and `area_mean` are all essentially measuring cell size from different angles. The correlation between them is almost perfect. This multicollinearity doesn't break the model, but it's worth knowing — and DataRobot's feature selection handles it automatically.
 
-All top predictors measure **cell size** or **shape irregularity** — consistent with how pathologists diagnose cancer manually under a microscope.
+### Cell size is the most visible difference
 
-**3. PCA Separation**
-Even when compressed to just 2 dimensions (capturing 63.3% of variance), Benign and Malignant cases form visually distinct clusters — confirming the features carry strong discriminative signal.
+![Mean Feature Comparison](chart4_mean_features_comparison.png)
 
-**4. Core Clinical Narrative**
-> *"Malignant tumours are characterized by larger cell size and greater shape irregularity. These two biological properties drive the model's predictive power and are consistent with pathological diagnostic criteria."*
+When you average feature values by diagnosis, `area_mean` shows the largest gap between the two groups. Malignant tumours have roughly twice the average cell area of benign ones.
+
+### The two classes are genuinely separable
+
+![PCA Scatter](chart5_pca_scatter.png)
+
+Compressing all 30 features down to 2 dimensions (capturing 63.3% of total variance), the benign and malignant cases still form distinct clusters. There's overlap in the middle — that's where the hard cases live — but the separation is strong enough to explain why the model performs so well.
+
+### The feature ranking
+
+![Feature Importance Correlation](chart6_feature_importance_correlation.png)
+
+Top 5 by correlation with diagnosis: `concave points_worst` (0.794), `perimeter_worst` (0.783), `concave points_mean` (0.777), `radius_worst` (0.776), `perimeter_mean` (0.742). Every single one measures size or shape irregularity.
 
 ---
 
 ## Phase 3 — Model Training (DataRobot)
 
-**Platform:** DataRobot AutoML  
+I used DataRobot's AutoML to train and compare multiple model types simultaneously. One deliberate choice: I optimized for **AUC instead of accuracy**. For an imbalanced medical classification problem, AUC measures how well the model separates the two classes across all possible thresholds — which is the right question to ask.
+
 **Configuration:**
-- Learning type: Supervised
-- Target: `diagnosis` (Binary Classification)
-- Positive class: 1 (Malignant)
-- Optimization metric: **AUC** (not accuracy — clinically appropriate for imbalanced classes)
-- Validation: Training-validation-holdout (64% / 16% / 20%)
+- Target: `diagnosis` (binary classification, positive class = 1/Malignant)
+- Optimization metric: AUC
+- Validation: 64% training / 16% validation / 20% holdout
 - Sampling: Stratified
 
-### Model Leaderboard (Top Models by Holdout AUC)
+### Why I picked XGBoost over the neural network
 
-| Model | Holdout AUC |
-|---|---|
-| eXtreme Gradient Boosted Trees | **0.9855** |
-| Keras Neural Network (64%) | 0.9868 |
-| Random Forest | 0.9818 |
-| Light Gradient Boosted Trees | 0.9818 |
+The Keras neural network had a slightly higher cross-validation AUC, but XGBoost generalized more consistently to the holdout set. More importantly, XGBoost produces interpretable feature importance scores. In a clinical context, a model needs to explain *why* it flagged a patient — not just *that* it did. A black-box neural network fails that test.
 
-### Selected Model: eXtreme Gradient Boosted Trees (XGBoost)
+### What the model learned
 
-**Why XGBoost over the Keras Neural Network:**
-- More consistent generalization to unseen data
-- Produces interpretable feature importance scores
-- In clinical settings, explainability matters — a model must communicate *why* it flagged a patient, not just *that* it did
+![Feature Impact DataRobot](chart7_feature_impact_datarobot.png)
 
-### Model Performance (Holdout Set — 114 Unseen Patients)
+DataRobot's SHAP-based feature importance confirmed 3 of the 5 predictors I identified manually in EDA: `concave points_worst`, `perimeter_worst`, and `radius_worst`. It also surfaced `smoothness_worst` and `area_se` — adding a third dimension to the clinical story. Malignant cells aren't just larger and more irregular — they're also more variable in surface texture and area across the tumour sample.
+
+### Performance on validation data
+
+![ROC Curve Validation](chart8_roc_confusion_matrix.png)
+
+On the validation set, the model achieved a perfect confusion matrix — zero false negatives, zero false positives. This is the in-sample result, so it needs to be taken with appropriate skepticism.
+
+### Performance on the holdout set (the honest number)
+
+![ROC Curve Holdout](chart9_roc_holdout_confusion_matrix.png)
+
+On 114 completely unseen patients:
 
 | Metric | Score |
 |---|---|
-| AUC | **0.9855** |
-| F1 Score | **0.9512** |
-| Sensitivity / Recall | **0.9286** |
-| Precision | **0.9750** |
-| Gini Norm | 0.9709 |
-| Max MCC | 0.9245 |
-| Rate @ Top 10% | **1.0000** |
+| AUC | 0.9855 |
+| F1 Score | 0.9512 |
+| Recall / Sensitivity | 0.9286 |
+| Precision | 0.9750 |
 
-### Confusion Matrix (Holdout)
+The model correctly identified 39 of 42 malignant cases and flagged only 1 benign case incorrectly. Three malignant cases were missed.
 
-| | Predicted Benign | Predicted Malignant |
-|---|---|---|
-| **Actual Benign** | 71 ✅ TN | 1 ⚠️ FP |
-| **Actual Malignant** | 3 ❌ FN | 39 ✅ TP |
+### Full metric breakdown
 
-**Rate@Top10% = 1.000** — Every malignant case appears in the top 10% highest-risk scores. A hospital screening the top 10% of flagged patients would catch every cancer in this dataset.
+![Metric Scores](chart10_metric_scores.png)
 
-### Feature Importance (SHAP Values)
+The Rate@Top10% score of 1.000 is worth highlighting: every malignant case in the holdout set appears in the top 10% of highest-risk predictions. A hospital screening only the top 10% of flagged patients would catch every cancer.
 
-| Rank | Feature | Relative Impact |
-|---|---|---|
-| 1 | concave points_worst | 100% |
-| 2 | smoothness_worst | 95% |
-| 3 | perimeter_worst | 88% |
-| 4 | radius_worst | 85% |
-| 5 | area_se | 78% |
-| 6 | texture_mean | 72% |
+### On the 3 missed cases
 
-**Notable:** The model independently confirmed 3 of the top 5 features identified manually in Phase 2 EDA — validating the exploratory analysis approach.
-
-### The False Negative Argument
-> *"At the default threshold, 3 malignant cases out of 42 were missed — a false negative rate of 7.1%. In a clinical decision support tool, this threshold should be adjusted downward to prioritize catching every possible malignancy, accepting slightly more false alarms. This threshold decision belongs to clinicians, not algorithms."*
+Missing 3 out of 42 malignant cases isn't a model failure — it's a threshold decision. At the default 0.5 threshold, the model is balanced between precision and recall. Lowering the threshold to 0.3 would catch more cancers at the cost of more false alarms. That trade-off is a clinical judgment, not a technical one. The model should surface the risk score; a clinician should decide what to do with it.
 
 ---
 
-## Phase 4 — Clinical Impact Analysis (Excel)
+## Phase 4 — Clinical Impact (Excel)
 
-**File:** `breast_cancer_phase4_clinical_impact.xlsx`
+Model metrics are useful for comparing algorithms. They're not useful for explaining to a hospital administrator why they should change their diagnostic process. So I translated the results into terms that matter.
 
-### Workbook Structure
-1. **Model Summary** — All performance metrics in one reference table
-2. **Confusion Matrix** — Color-coded breakdown of prediction outcomes
-3. **Clinical Cost Analysis** — Human and financial cost of diagnostic errors
-4. **Baseline Comparison** — Model vs no-model vs perfect model
-5. **Dashboard Summary** — Clean summary tables for Tableau
+**The comparison that tells the story:**
 
-### Key Findings
-
-**Human Impact:**
-- 5-year survival rate for early-stage breast cancer: **99%**
-- 5-year survival rate for late-stage breast cancer: **27%**
-- Each missed malignancy risks a **72% reduction in survival probability** if detected late
-
-**Financial Impact:**
-
-| Scenario | Cases Caught | Cases Missed | Treatment Cost |
+| Scenario | Cancers Caught | Cancers Missed | Est. Treatment Cost |
 |---|---|---|---|
-| No Model (Baseline) | 16 | 26 | $3,380,000 |
-| **XGBoost Model** | **39** | **3** | **$390,000** |
-| Perfect Model | 42 | 0 | $0 |
+| No model (baseline) | 16 | 26 | $3,380,000 |
+| XGBoost model | 39 | 3 | $390,000 |
+| Perfect model | 42 | 0 | $0 |
 
-- **23 additional cancers caught** compared to unassisted baseline
-- **$2,990,000 in avoidable treatment costs prevented** on holdout set alone
-- Scaled to full dataset: approximately **$1.95M in preventable late-stage treatment costs**
+The cost figures are based on the well-documented gap between early-stage (~$20K) and late-stage (~$150K) breast cancer treatment costs. A missed diagnosis doesn't just cost a life — it costs $130,000 more to treat when the cancer is eventually found at a later stage.
+
+**The numbers:**
+- 23 additional cancers caught vs. unassisted baseline
+- $2,990,000 in avoidable treatment costs prevented on the holdout set alone
+- Each missed malignancy carries a 72% reduction in 5-year survival probability (99% early-stage vs. 27% late-stage)
 
 ---
 
 ## Phase 5 — Tableau Visualizations
 
-Three analytical visualizations built from the cleaned patient-level dataset:
+Three analytical views built from the patient-level dataset rather than summary tables:
 
-**1. Scatter Plot — Cell Irregularity vs Perimeter**
-- Each dot = one patient, colored by diagnosis
-- Separate trend lines per class with confidence bands
-- Visually proves the natural separation between Benign and Malignant cases
+**Scatter plot** — Each dot is a real patient, colored by diagnosis, plotted on the two strongest predictors. The natural separation between the green (benign) and red (malignant) clusters visually explains why the model works.
 
-**2. Box Plot Dashboard — Top 6 Feature Distributions**
-- Side-by-side comparison of Benign vs Malignant for 6 strongest predictors
-- Confirms Malignant cases consistently show higher values and wider spread
+**Box plots** — Side-by-side distribution comparison across the top 6 predictors. Malignant cases sit higher and spread wider on every feature. Texture mean shows the least separation — confirming it's the weakest of the six.
 
-**3. Heatmap — Average Feature Values by Diagnosis**
-- All 30 features normalized to 0-1 scale
-- Color intensity shows discriminative power at a glance
-- Strongest contrast: Area Worst (558 Benign vs 1,422 Malignant — 2.5x difference)
+**Heatmap** — All 30 features normalized to 0–1 and compared by diagnosis. The contrast between benign and malignant is strongest for `area_worst` (average 559 vs. 1,422 — a 2.5x difference) and weakest for `fractal_dimension_se` (essentially identical between groups).
 
 ---
 
-## Results Summary
+## Files
 
-| Metric | Value |
-|---|---|
-| Best Model | eXtreme Gradient Boosted Trees |
-| Holdout AUC | 0.9855 |
-| Cancers Correctly Identified | 39 / 42 (92.9%) |
-| False Negative Rate | 7.1% |
-| Additional Cases vs Baseline | +23 cancers caught |
-| Preventable Treatment Cost Savings | $2,990,000 |
+```
+breast_cancer_phase1_cleaning.ipynb   — cleaning notebook
+breast_cancer_phase2_EDA.ipynb        — EDA notebook with all 6 charts
+breast_cancer_clean.csv               — cleaned dataset
+breast_cancer_dataset.csv             — original Kaggle download
+breast_cancer_phase4_clinical_impact.xlsx  — clinical impact workbook
+chart1 through chart10                — all visualizations
+```
 
 ---
 
 ## Key Takeaways
 
-1. **Accuracy is the wrong metric for medical diagnosis.** A model predicting "Benign" for every patient scores 62.7% accuracy while missing every cancer. Recall and AUC are the correct metrics.
+Accuracy is the wrong metric for medical diagnosis. The model's 62.7% baseline accuracy is meaningless — what matters is whether it catches cancers, and how many it misses.
 
-2. **Cell shape irregularity and size are the dominant malignancy markers.** `concave points_worst` and `perimeter_worst` consistently rank as the top predictors — consistent with pathological diagnostic criteria.
+The biology is consistent throughout. Every analysis — manual correlation, PCA, SHAP importance — points to the same two properties: cell size and shape irregularity. The model isn't doing anything mysterious. It's quantifying what pathologists already look for.
 
-3. **Threshold matters more than model choice.** The difference between catching 39 and 42 malignant cases is not about the algorithm — it is about where you set the classification threshold. Lower thresholds catch more cancers at the cost of more false alarms.
+Threshold matters more than algorithm choice. The gap between catching 39 and 42 malignant cases isn't about picking a better model — it's about where you set the decision boundary. That's a clinical question, not a data science one.
 
-4. **Clinical impact must be quantified in human and financial terms.** A model with 0.9855 AUC is meaningless to a hospital administrator. "$2.99M in preventable treatment costs" and "23 additional cancers caught" are meaningful.
-
-5. **Explainability is non-negotiable in healthcare.** XGBoost was chosen over a marginally better neural network because feature importance scores allow clinicians to understand and trust the model's reasoning.
+Clinical impact has to be quantified in human terms. AUC of 0.9855 means nothing to a hospital administrator. "23 additional cancers caught" and "$2.99M in preventable costs" do.
 
 ---
 
-## About
+**Muzammil Ansari**  
+Post-Baccalaureate Diploma in Business Analytics — University of the Fraser Valley  
+[LinkedIn](https://linkedin.com/in/muzammilansari7494) | Abbotsford, BC
 
-**Author:** Muzammil Ansari  
-**Program:** Post-Baccalaureate Diploma in Business Analytics, University of the Fraser Valley  
-**LinkedIn:** [linkedin.com/in/muzammilansari7494](https://linkedin.com/in/muzammilansari7494)  
-**Location:** Abbotsford, BC, Canada
-
----
-
-*Data source: Breast Cancer Wisconsin (Diagnostic) Dataset — UCI Machine Learning Repository. This project is for educational and portfolio purposes. The model is not intended for clinical use.*
+*Dataset: UCI Breast Cancer Wisconsin (Diagnostic). This project is for portfolio and educational purposes only and is not intended for clinical use.*
